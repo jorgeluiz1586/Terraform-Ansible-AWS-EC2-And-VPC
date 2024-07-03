@@ -1,0 +1,104 @@
+- name: Basic Setup
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Wait 200 seconds for port 22 to become open and contain "OpenSSH"
+      ansible.builtin.wait_for:
+        port: 22
+        host: "{{ (ansible_ssh_host|default(ansible_host))|default(inventory_hostname) }}"
+        search_regex: OpenSSH
+        delay: 10
+        timeout: 200
+      vars:
+        ansible_connection: local
+
+    - name: Set a hostname
+      ansible.builtin.hostname:
+        name: "{{ node_hostname }}"
+
+    - name: apply sysctl params without reboot
+      ansible.builtin.shell: sysctl --system
+
+    - name: Install containerd pre-reqs
+      ansible.builtin.apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+          - ubuntu-desktop
+          - tightvncserver
+          - gnome-panel
+          - gnome-settings-daemon
+          - metacity
+          - nautilus
+          - gnome-terminal
+          - curl
+
+    - name: add docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu jammy stable
+        state: present
+
+    - name: Update apt and install docker-ce
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: true
+
+    - name: Install containerd.io
+      ansible.builtin.apt:
+        pkg:
+          - containerd.io
+
+    - name: Enable containerd
+      ansible.builtin.systemd:
+        name: containerd
+        daemon_reload: yes
+        state: started
+        enabled: yes
+
+    - name: Restart service cron, in all cases, also issue daemon-reload to pick up config changes
+      ansible.builtin.systemd:
+        state: restarted
+        daemon_reload: yes
+        name: containerd
+
+    - name: Starting VNC Server
+      ansible.builtin.shell:  vncserver :1
+    
+    - name: Config VNC Server
+      ansible.builtin.shell:  "cat >> some.text << 'END'
+        #!/bin/sh
+
+        export XKL_XMODMAP_DISABLE=1
+        unset SESSION_MANAGER
+        unset DBUS_SESSION_BUS_ADDRESS
+
+        [ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
+        [ -r $HOME/.Xresources ] && xrdb $HOME/.Xresources
+        xsetroot -solid grey
+
+        vncconfig -iconic &
+        gnome-panel &
+        gnome-settings-daemon &
+        metacity &
+        nautilus &
+        gnome-terminal &
+        END
+        "
+
+    - name: Starting VNC Server
+      ansible.builtin.shell:  vncserver -kill :1
+
+    - name: Starting VNC Server
+      ansible.builtin.shell:  vncserver -geometry 1920x1080 :1
+
+
